@@ -29,23 +29,17 @@ const int battFactor = 777; // Conversion factor.
 #define PIXELPIN     17 // aka Pin 17 D17 for Teensy Special led driver hw
 #define NUMPIXELS    13
 WS2812FX ws2812fx = WS2812FX(NUMPIXELS, PIXELPIN, NEO_GRB + NEO_KHZ800);
-unsigned int lightModeCheck = 0; // Next service timer.
-int lightModeInterval = 50; // millis before servicing pixels
 
 // GPS processing setup
 #define GPSPWRPIN    13 // aka Pin 13 D13. High to power up GPS. Serial2 RX,TX D9, D10 Pin 9,Pin10
 #define PMTK_SET_NMEA_OUTPUT_RMCONLY "$PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29"
 TinyGPSPlus gps;
-int gpsInterval = 4000; // Check every 4 secs.
-unsigned int gpsCheck = 0; // Next service timer.
 double distance = 0;
 double courseTo = 0;
 bool gpsEnabled = true;
 
 // COM Serial Setup
 // Esp serial comms on Serial3 - RX D7, TX D8
-int comInterval = 10000; // Check every 10 secs.
-unsigned int comCheck = 0; // Next service timer.
 EasyTransfer ETIn, ETOut;
 struct ESP_DATA{ //put your variable definitions here for the data you want to receive
   double destLon;
@@ -63,16 +57,60 @@ TEENSY_DATA tnsyData;
 
 //byte mode = 0; 
 bool modeInitd = false;
-bool rdyToSend = false; // Set to true if we have priority data to send.
 int lColor = 0;
 int rColor = 0;
 double lastCourse = 0;
 double lastCourseTo = 0;
 
+void gpsUpdate() {
+  if (gps.location.isValid()) {
+    double newLat = 0;
+    double newLon = 0;
+    newLat = gps.location.lat();
+    newLon = gps.location.lng();
+    if ((newLat != tnsyData.myLat) || (newLon != tnsyData.myLon)) {
+      tnsyData.myLon = newLon;
+      tnsyData.myLat = newLat;
+      distance = gps.distanceBetween(tnsyData.myLat,tnsyData.myLon,espData.destLat,espData.destLon) / 1000.0;
+      courseTo = gps.courseTo(tnsyData.myLat,tnsyData.myLon,espData.destLat,espData.destLon);
+      tnsyData.course = gps.course.deg();
+      Serial.println();
+      Serial.println("DATA-RECEIVED: GPS");
+      Serial.print(tnsyData.myLat, 6);
+      Serial.print(F(","));
+      Serial.println(tnsyData.myLon, 6);
+      Serial.print("DistanceKM: ");
+      Serial.println(distance);
+      Serial.print("Course: ");
+      Serial.println(tnsyData.course);
+      Serial.print("CourseCard: ");
+      Serial.println(gps.cardinal(tnsyData.course));
+      Serial.print("CourseTo: ");
+      Serial.println(courseTo);
+      Serial.print("CourseToCard: ");
+      Serial.println(gps.cardinal(courseTo));
+      if ((int(tnsyData.course-courseTo+360)%360) > 180) {
+        // Red = int16711937, green = int130817
+        Serial.println("Turn Right.");
+        rColor = 130817;
+        lColor = 16711937;
+      } else {
+        Serial.println("Turn Left.");
+        rColor = 16711937;
+        lColor = 130817;
+      }
+      ETOut.sendData();
+    } else {
+      //Serial.println("No GPS Change");
+    }
+  } else {
+    Serial.println("DATA-RECEIVED: GPS fix invalid.");
+  }
+}
+
 void setup() {
   Serial.begin(19200); // Start USB monitor Serial.
   Serial.println("Starting TheTeensyStick.");
-
   pinMode(FNPIN,INPUT_PULLUP);
   pinMode(BATTPIN,INPUT);
   pinMode(OKPIN,INPUT_PULLUP);
@@ -81,8 +119,6 @@ void setup() {
   battCheck = millis();
   ETIn.begin(details(espData),&Serial3);
   ETOut.begin(details(tnsyData),&Serial3);
-
-  Serial.println("Init Pixels.");
   ws2812fx.init();
   ws2812fx.setBrightness(128);
   // parameters: index, start, stop, mode, color, speed, reverse
@@ -92,26 +128,18 @@ void setup() {
   ws2812fx.setSegment(3, 7, 9, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 3 is leds 7-9
   ws2812fx.setSegment(4, 10, 12, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 3 is leds 10-12
   ws2812fx.start();
-  lightModeCheck = millis() + lightModeInterval;
-
-  Serial.println("GPS ON.");
   pinMode(GPSPWRPIN,OUTPUT);
   digitalWrite(GPSPWRPIN,HIGH);
   gpsEnabled = true;
   delay(2000);
   Serial2.begin(9600); // Start GPS Serial 2
   Serial2.println(PMTK_SET_NMEA_OUTPUT_RMCONLY); // turn on only the second sentence (GPRMC)
-  gpsCheck = millis() + gpsInterval;
-
-  Serial.println("ESP Serial ON.");
   Serial3.begin(19200);
-  Serial3.println("Teensy is UP.");
-  comCheck = comInterval + millis();
   tnsyData.mode = 0;
 }
 
 void loop() {
-  // First see if its time to process subs.
+  // Event Timer Processing.
   if (millis() > lightCheck) {     // Time to check for light level.
     lightCheck = millis() + lightInterval;
     byte valueAnalog = 0;
@@ -132,74 +160,21 @@ void loop() {
   if (millis() > inputCheck) {     // Time to check for input buttons.
     inputCheck = millis() + inputInterval;
     if ((digitalRead(FNPIN) == LOW) && !(btnFn)) {
-      Serial.println("FN Pressed");
+      Serial.println("INPUT: FN Pressed");
       btnFn = true;
-      rdyToSend = true;
     }
     if ((digitalRead(FNPIN) == HIGH) && (btnFn)) {
-      Serial.println("FN Released");
+      Serial.println("INPUT: FN Released");
       btnFn = false;
-      rdyToSend = true;
     }
     if ((digitalRead(OKPIN) == LOW) && !(btnOK)) {
-      Serial.println("OK Pressed");
+      Serial.println("INPUT: OK Pressed");
       btnOK = true;
-      rdyToSend = true;
     }
     if ((digitalRead(OKPIN) == HIGH) && (btnOK)) {
-      Serial.println("OK Released");
+      Serial.println("INPUT: OK Released");
       btnOK = false;
-      rdyToSend = true;
     }
-  }
-  if ((millis() > gpsCheck) && (gpsEnabled)) {     // Time to service GPS.
-    gpsCheck = millis() + gpsInterval;
-    Serial.println("");
-    if (gps.location.isValid()) {
-      double newLat = 0;
-      double newLon = 0;
-      newLat = gps.location.lat();
-      newLon = gps.location.lng();
-      if ((newLat != tnsyData.myLat) || (newLon != tnsyData.myLon)) {
-        tnsyData.myLon = newLon;
-        tnsyData.myLat = newLat;
-        distance = gps.distanceBetween(tnsyData.myLat,tnsyData.myLon,espData.destLat,espData.destLon) / 1000.0;
-        courseTo = gps.courseTo(tnsyData.myLat,tnsyData.myLon,espData.destLat,espData.destLon);
-        tnsyData.course = gps.course.value();
-        Serial.print(tnsyData.myLat, 6);
-        Serial.print(F(","));
-        Serial.println(tnsyData.myLon, 6);
-        Serial.print("DistanceKM: ");
-        Serial.println(distance);
-        Serial.print("Course: ");
-        Serial.println(tnsyData.course);
-        Serial.print("CourseCard: ");
-        Serial.println(gps.cardinal(tnsyData.course));
-        Serial.print("CourseTo: ");
-        Serial.println(courseTo);
-        Serial.print("CourseToCard: ");
-        Serial.println(gps.cardinal(courseTo));
-        if ((int(tnsyData.course-courseTo+360)%360) > 180) {
-          // Red = int16711937, green = int130817
-          Serial.println("Turn Right.");
-          rColor = 130817;
-          lColor = 16711937;
-        } else {
-          Serial.println("Turn Left.");
-          rColor = 16711937;
-          lColor = 130817;
-        }
-      } else {
-        //Serial.println("No GPS Change");
-      }
-    } else {
-      Serial.println("no valid GPS Data.");
-    }
-  }
-  if ((millis() > comCheck) || (rdyToSend)) {
-    ETOut.sendData();
-    comCheck = millis() + comInterval;
-    rdyToSend = false;
   }
   // End of event servicing.
   if (btnFn) {
@@ -210,25 +185,26 @@ void loop() {
     modeInitd = false;
   }
   while (Serial2.available() > 0) { // GPS Data is ready.
-    gps.encode(Serial2.read());
-    yield();
+    if (gps.encode(Serial2.read())) {
+      gpsUpdate();
+    }
   }
   while (Serial3.available() > 0) { // ESP Data is ready.
     if (ETIn.receiveData()) {
-      Serial.println("New ESP Data Receieved.");
+      Serial.println();
+      Serial.println("DATA-RECEIVED: ESP8266");
       Serial.print(espData.destLat, 6);
       Serial.print(F(","));
       Serial.println(espData.destLon, 6);
     }
   }
   ws2812fx.service();
+  ws2812fx.setBrightness(brightLevel);
   switch (tnsyData.mode) { //0=setup, 1=findcache, 2=headlight walking, 3=headlight warn walking, 4= area light, 
     case 0:
     // Setup Mode
-      ws2812fx.setBrightness(128);
       if (!modeInitd) {
-        Serial.println("Setup Mode");
-        Serial.println("GPS ON.");
+        Serial.println("NEW-MODE: Setup");
         digitalWrite(GPSPWRPIN,HIGH);
         gpsEnabled = true;
         ws2812fx.stop();
@@ -246,10 +222,8 @@ void loop() {
     break;
     case 1:
     // FindCache Mode
-      ws2812fx.setBrightness(brightLevel);
       if (!modeInitd) {
-        Serial.println("Find Cache Mode");
-        Serial.println("GPS ON.");
+        Serial.println("NEW-MODE: Find Cache");
         digitalWrite(GPSPWRPIN,HIGH);
         gpsEnabled = true;
         ws2812fx.stop();
@@ -275,10 +249,8 @@ void loop() {
     break;
     case 2:
     // Headlight Walking Mode
-      ws2812fx.setBrightness(brightLevel);
       if (!modeInitd) {
-        Serial.println("Headlight Walking Mode");
-        Serial.println("GPS OFF.");
+        Serial.println("NEW-MODE: Walking light");
         digitalWrite(GPSPWRPIN,LOW);
         gpsEnabled = false;
         ws2812fx.stop();
@@ -295,10 +267,8 @@ void loop() {
     break;
     case 3:
     // Headlight Warn Walking Mode
-      ws2812fx.setBrightness(brightLevel);
       if (!modeInitd) {
-        Serial.println("Headlight Warn Walking Mode");
-        Serial.println("GPS OFF.");
+        Serial.println("NEW-MODE: Walking warning");
         digitalWrite(GPSPWRPIN,LOW);
         gpsEnabled = false;
         // parameters: index, start, stop, mode, color, speed, reverse
@@ -315,10 +285,9 @@ void loop() {
       break;
     case 4:
     // Area Light Mode
-      ws2812fx.setBrightness(brightLevel);
       if (!modeInitd) {
         // parameters: index, start, stop, mode, color, speed, reverse
-        Serial.println("Area Light Mode");
+        Serial.println("NEW-MODE: Area light");
         Serial.println("GPS OFF.");
         digitalWrite(GPSPWRPIN,LOW);
         gpsEnabled = false;
@@ -333,9 +302,8 @@ void loop() {
         modeInitd = true;
       }
     break;
-
     default:
-    Serial.println("case error.");
+    // No Operation.
+    break;
   }
- 
 }
