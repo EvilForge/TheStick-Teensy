@@ -38,14 +38,9 @@ int lightModeInterval = 50; // millis before servicing pixels
 TinyGPSPlus gps;
 int gpsInterval = 4000; // Check every 4 secs.
 unsigned int gpsCheck = 0; // Next service timer.
-//const double Dest_Lat = 13.3248881;
-//const double Dest_Lon = -86.5733932;
 double distance = 0;
 double courseTo = 0;
-double course = 0;
 bool gpsEnabled = true;
-//double myLat = 0;
-//double myLon = 0;
 
 // COM Serial Setup
 // Esp serial comms on Serial3 - RX D7, TX D8
@@ -61,6 +56,7 @@ struct TEENSY_DATA{ //put your variable definitions here for the data you want t
   byte mode;
   double myLon;
   double myLat;
+  double course;
 };
 ESP_DATA espData;
 TEENSY_DATA tnsyData;
@@ -92,7 +88,6 @@ void setup() {
   ws2812fx.setSegment(3, 7, 9, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 3 is leds 7-9
   ws2812fx.setSegment(4, 10, 12, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 3 is leds 10-12
   ws2812fx.start();
-  //pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
   lightModeCheck = millis() + lightModeInterval;
 
   Serial.println("GPS ON.");
@@ -121,8 +116,6 @@ void loop() {
     valueAnalog = valueAnalog < 1 ? 1 : valueAnalog;
     sensorLight = valueAnalog;
     brightLevel = sensorLight*255/100;
-//    Serial.print("Brightness: ");
-//    Serial.println(brightLevel);
   }
   if (millis() > battCheck) {     // Time to check for battery level.
     battCheck = millis() + battInterval;
@@ -131,8 +124,6 @@ void loop() {
     valueAnalog = valueAnalog > 1023 ? 1023 : valueAnalog;
     valueAnalog = valueAnalog < 1 ? 1 : valueAnalog;
     tnsyData.battPct = valueAnalog*5/battFactor;
-//    Serial.print("Battery: ");
-//    Serial.println(tnsyData.battPct);
   }
   if (millis() > inputCheck) {     // Time to check for input buttons.
     inputCheck = millis() + inputInterval;
@@ -170,14 +161,14 @@ void loop() {
         tnsyData.myLat = newLat;
         distance = gps.distanceBetween(tnsyData.myLat,tnsyData.myLon,espData.destLat,espData.destLon) / 1000.0;
         courseTo = gps.courseTo(tnsyData.myLat,tnsyData.myLon,espData.destLat,espData.destLon);
-        course = gps.course.value();
+        tnsyData.course = gps.course.value();
         Serial.print(tnsyData.myLat, 6);
         Serial.print(F(","));
         Serial.println(tnsyData.myLon, 6);
         Serial.print("Distance: ");
         Serial.println(distance);
         Serial.print("Course: ");
-        Serial.println(gps.cardinal(course));
+        Serial.println(gps.cardinal(tnsyData.course));
         Serial.print("CourseTo: ");
         Serial.println(courseTo);
         Serial.print("CardinalTo: ");
