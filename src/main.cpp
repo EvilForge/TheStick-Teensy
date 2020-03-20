@@ -57,6 +57,7 @@ TEENSY_DATA tnsyData;
 
 //byte mode = 0; 
 bool modeInitd = false;
+int fColor = 0;
 int lColor = 0;
 int rColor = 0;
 double lastCourse = 0;
@@ -79,8 +80,8 @@ void gpsUpdate() {
       Serial.print(tnsyData.myLat, 6);
       Serial.print(F(","));
       Serial.println(tnsyData.myLon, 6);
-      Serial.print("DistanceKM: ");
-      Serial.println(distance);
+      Serial.print("Distance m: ");
+      Serial.println(distance*1000);
       Serial.print("Course: ");
       Serial.println(tnsyData.course);
       Serial.print("CourseCard: ");
@@ -89,15 +90,31 @@ void gpsUpdate() {
       Serial.println(courseTo);
       Serial.print("CourseToCard: ");
       Serial.println(gps.cardinal(courseTo));
-      if ((int(tnsyData.course-courseTo+360)%360) > 180) {
-        // Red = int16711937, green = int130817
-        Serial.println("Turn Right.");
-        rColor = 130817;
-        lColor = 16711937;
+      if ((distance*1000) < 3) { // We're 3m or less - show "Arrived"
+        Serial.println("Arrived.");
+        fColor = GREEN;
+        rColor = GREEN;
+        lColor = GREEN;
       } else {
-        Serial.println("Turn Left.");
-        rColor = 16711937;
-        lColor = 130817;
+        if (abs(tnsyData.course-courseTo) < 6) {
+          // We're within 6 degrees +- so light front led.
+          Serial.println("Go Straight.");
+          fColor = GREEN;
+          rColor = BLACK;
+          lColor = BLACK;
+        } else {
+          if ((int(tnsyData.course-courseTo+360)%360) > 180) {
+            Serial.println("Turn Right.");
+            fColor = BLACK;
+            rColor = GREEN;
+            lColor = RED;
+          } else {
+            Serial.println("Turn Left.");
+            fColor = BLACK;
+            rColor = RED;
+            lColor = GREEN;
+          }
+        }
       }
       ETOut.sendData();
     } else {
@@ -122,11 +139,11 @@ void setup() {
   ws2812fx.init();
   ws2812fx.setBrightness(128);
   // parameters: index, start, stop, mode, color, speed, reverse
-  ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, 0x000022, 1500, false); // segment 0 is led 0
-  ws2812fx.setSegment(1, 1, 3, FX_MODE_SCAN, 0x222222, 1500, false); // segment 1 is leds 1-3
-  ws2812fx.setSegment(2, 4, 6, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 2 is leds 4-6
-  ws2812fx.setSegment(3, 7, 9, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 3 is leds 7-9
-  ws2812fx.setSegment(4, 10, 12, FX_MODE_SCAN, 0x222222, 1500, false);  // segment 3 is leds 10-12
+  ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, BLUE, 1500, false); // segment 0 is led 0
+  ws2812fx.setSegment(1, 1, 3, FX_MODE_SCAN, BLUE, 1500, false); // segment 1 is leds 1-3
+  ws2812fx.setSegment(2, 4, 6, FX_MODE_SCAN, BLUE, 1500, false);  // segment 2 is leds 4-6
+  ws2812fx.setSegment(3, 7, 9, FX_MODE_SCAN, BLUE, 1500, false);  // segment 3 is leds 7-9
+  ws2812fx.setSegment(4, 10, 12, FX_MODE_SCAN, BLUE, 1500, false);  // segment 3 is leds 10-12
   ws2812fx.start();
   pinMode(GPSPWRPIN,OUTPUT);
   digitalWrite(GPSPWRPIN,HIGH);
@@ -211,13 +228,26 @@ void loop() {
         Serial2.begin(9600);
         Serial2.flush();
         // parameters: index, start, stop, mode, color, speed, reverse
-        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, 0x000022, 1500, false); // segment 0 is led 0
-        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, 0x010101, 0, false); // segment 1 is leds 1-3 Rear
+        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, BLACK, 0, false); // segment 1 is leds 1-3 Rear
         ws2812fx.setSegment(2, 4, 6, FX_MODE_BLINK, lColor, 1500, false);  // segment 2 is leds 4-6 Left
-        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, 0x010101, 0, false);  // segment 3 is leds 7-9 Front
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, BLACK, 0, false);  // segment 3 is leds 7-9 Front
         ws2812fx.setSegment(4, 10, 12, FX_MODE_BLINK, rColor, 1500, false);  // segment 3 is leds 10-12 Right
         ws2812fx.start();
         modeInitd = true;
+      }
+      if ((lastCourse != tnsyData.course) || (lastCourseTo != courseTo)) {
+        // Course Change
+        lastCourseTo = courseTo;
+        lastCourse = tnsyData.course;
+        ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, lColor, 0, false);  // segment 2 is leds 4-6 Left
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, fColor, 0, false);  // segment 3 is leds 7-9 Front
+        ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, rColor, 0, false);  // segment 3 is leds 10-12 Right
+        ws2812fx.start();
+        if (tnsyData.battPct < 3.00) {
+          ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, (const uint32_t[]) {BLUE,RED}, 1500, false); // segment 0 is led 0          
+        } else {
+          ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, BLUE, 1500, false); // segment 0 is led 0
+        }
       }
     break;
     case 1:
@@ -230,10 +260,10 @@ void loop() {
         Serial2.begin(9600);
         Serial2.flush();
         // parameters: index, start, stop, mode, color, speed, reverse
-        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, 0x003300, 1500, false); // segment 0 is led 0
-        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, 0x010101, 0, false); // segment 1 is leds 1-3 Rear
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, GREEN, 1500, false); // segment 0 is led 0
+        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, BLACK, 0, false); // segment 1 is leds 1-3 Rear
         ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, lColor, 0, false);  // segment 2 is leds 4-6 Left
-        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, 0x010101, 0, false);  // segment 3 is leds 7-9 Front
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, BLACK, 0, false);  // segment 3 is leds 7-9 Front
         ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, rColor, 0, false);  // segment 3 is leds 10-12 Right
         ws2812fx.start();
         modeInitd = true;
@@ -243,8 +273,14 @@ void loop() {
         lastCourseTo = courseTo;
         lastCourse = tnsyData.course;
         ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, lColor, 0, false);  // segment 2 is leds 4-6 Left
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, fColor, 0, false);  // segment 3 is leds 7-9 Front
         ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, rColor, 0, false);  // segment 3 is leds 10-12 Right
         ws2812fx.start();
+        if (tnsyData.battPct < 3.00) {
+          ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, (const uint32_t[]) {GREEN,RED}, 1500, false); // segment 0 is led 0          
+        } else {
+          ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, GREEN, 1500, false); // segment 0 is led 0
+        }
       }
     break;
     case 2:
@@ -256,13 +292,18 @@ void loop() {
         ws2812fx.stop();
         Serial2.end();
         // parameters: index, start, stop, mode, color, speed, reverse
-        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, 0x333333, 0, false); // segment 0 is led 0
-        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, 0x010101, 0, false); // segment 1 is leds 1-3 Rear
-        ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, 0x010101, 0, false);  // segment 2 is leds 4-6 Left
-        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, 0xFFFFFF, 0, false);  // segment 3 is leds 7-9 Front
-        ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, 0x010101, 0, false);  // segment 3 is leds 10-12 Right
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, WHITE, 0, false); // segment 0 is led 0
+        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, BLACK, 0, false); // segment 1 is leds 1-3 Rear
+        ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, BLACK, 0, false);  // segment 2 is leds 4-6 Left
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, WHITE, 0, false);  // segment 3 is leds 7-9 Front
+        ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, BLACK, 0, false);  // segment 3 is leds 10-12 Right
         ws2812fx.start();
         modeInitd = true;
+      }
+      if (tnsyData.battPct < 3.00) {
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, (const uint32_t[]) {WHITE,RED}, 1500, false); // segment 0 is led 0          
+      } else {
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, WHITE, 1500, false); // segment 0 is led 0
       }
     break;
     case 3:
@@ -274,13 +315,18 @@ void loop() {
         // parameters: index, start, stop, mode, color, speed, reverse
         ws2812fx.stop();
         Serial2.end();
-        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, 0x220000, 500, false); // segment 0 is led 0
-        ws2812fx.setSegment(1, 1, 3, FX_MODE_BLINK, 0x220000, 500, false); // segment 1 is leds 1-3 Rear
-        ws2812fx.setSegment(2, 4, 6, FX_MODE_BLINK, 0xFFFF00, 500, false);  // segment 2 is leds 4-6 Left
-        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, 0xFFFFFF, 0, false);  // segment 3 is leds 7-9 Front
-        ws2812fx.setSegment(4, 10, 12, FX_MODE_BLINK, 0xFFFF00, 500, false);  // segment 3 is leds 10-12 Right
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, WHITE, 500, false); // segment 0 is led 0
+        ws2812fx.setSegment(1, 1, 3, FX_MODE_BLINK, RED, 500, false); // segment 1 is leds 1-3 Rear
+        ws2812fx.setSegment(2, 4, 6, FX_MODE_BLINK, YELLOW, 500, false);  // segment 2 is leds 4-6 Left
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, WHITE, 0, false);  // segment 3 is leds 7-9 Front
+        ws2812fx.setSegment(4, 10, 12, FX_MODE_BLINK, YELLOW, 500, false);  // segment 3 is leds 10-12 Right
         ws2812fx.start();
         modeInitd = true;
+      }
+      if (tnsyData.battPct < 3.00) {
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, (const uint32_t[]) {WHITE,RED}, 1500, false); // segment 0 is led 0          
+      } else {
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, WHITE, 1500, false); // segment 0 is led 0
       }
       break;
     case 4:
@@ -293,13 +339,18 @@ void loop() {
         gpsEnabled = false;
         ws2812fx.stop();
         Serial2.end();
-        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, 0xFFFFFF, 0, false); // segment 0 is led 0
-        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, 0xFFFFFF, 0, false); // segment 1 is leds 1-3 Rear
-        ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, 0xFFFFFF, 0, false);  // segment 2 is leds 4-6 Left
-        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, 0xFFFFFF, 0, false);  // segment 3 is leds 7-9 Front
-        ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, 0xFFFFFF, 0, false);  // segment 3 is leds 10-12 Right
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, WHITE, 0, false); // segment 0 is led 0
+        ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, WHITE, 0, false); // segment 1 is leds 1-3 Rear
+        ws2812fx.setSegment(2, 4, 6, FX_MODE_STATIC, WHITE, 0, false);  // segment 2 is leds 4-6 Left
+        ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, WHITE, 0, false);  // segment 3 is leds 7-9 Front
+        ws2812fx.setSegment(4, 10, 12, FX_MODE_STATIC, WHITE, 0, false);  // segment 3 is leds 10-12 Right
         ws2812fx.start();
         modeInitd = true;
+      }
+      if (tnsyData.battPct < 3.00) {
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, (const uint32_t[]) {WHITE,RED}, 1500, false); // segment 0 is led 0          
+      } else {
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_STATIC, WHITE, 1500, false); // segment 0 is led 0
       }
     break;
     default:
