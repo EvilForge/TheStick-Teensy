@@ -5,11 +5,9 @@
 
 // Input switch setup
 #define FNPIN        18  // aka Pin 18 D18
-#define OKPIN        19  // aka Pin 19 D19
 int inputInterval = 300; // Check 10x/sec.
 unsigned int inputCheck = 0; // Next service timer.
 bool btnFn = false;
-bool btnOK = false;
 
 // Light sensor setup
 const int LIGHTPIN = A6; // aka Analog A6 Pin20
@@ -130,7 +128,6 @@ void setup() {
   Serial.println("Starting TheTeensyStick.");
   pinMode(FNPIN,INPUT_PULLUP);
   pinMode(BATTPIN,INPUT);
-  pinMode(OKPIN,INPUT_PULLUP);
   pinMode(LIGHTPIN,INPUT);
   inputCheck = millis() + inputInterval;
   battCheck = millis();
@@ -184,14 +181,6 @@ void loop() {
       Serial.println("INPUT: FN Released");
       btnFn = false;
     }
-    if ((digitalRead(OKPIN) == LOW) && !(btnOK)) {
-      Serial.println("INPUT: OK Pressed");
-      btnOK = true;
-    }
-    if ((digitalRead(OKPIN) == HIGH) && (btnOK)) {
-      Serial.println("INPUT: OK Released");
-      btnOK = false;
-    }
   }
   // End of event servicing.
   if (btnFn) {
@@ -228,6 +217,7 @@ void loop() {
         Serial2.begin(9600);
         Serial2.flush();
         // parameters: index, start, stop, mode, color, speed, reverse
+        ws2812fx.setSegment(0, 0, 0, FX_MODE_BLINK, BLUE, 1500, false); // segment 0 is led 0
         ws2812fx.setSegment(1, 1, 3, FX_MODE_STATIC, BLACK, 0, false); // segment 1 is leds 1-3 Rear
         ws2812fx.setSegment(2, 4, 6, FX_MODE_BLINK, lColor, 1500, false);  // segment 2 is leds 4-6 Left
         ws2812fx.setSegment(3, 7, 9, FX_MODE_STATIC, BLACK, 0, false);  // segment 3 is leds 7-9 Front
